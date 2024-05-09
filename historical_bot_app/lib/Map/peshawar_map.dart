@@ -25,7 +25,7 @@ class _peshawar_mapState extends State<peshawar_map> {
   final Set<Marker> _markers = {};
   final Set<Polyline> _polylines = {};
   LatLng _currentLocation = LatLng(34.0151, 71.5249); // Default location
-  String googleApiKey = "AIzaSyA1qC1vxJnnk9Z3rqe5AGrfBcO3866UzG4";
+  String googleApiKey = "";
 
   @override
   void initState() {

@@ -1,4 +1,4 @@
-// ignore_for_file: camel_case_types, prefer_const_constructors, no_leading_underscores_for_local_identifiers, unused_local_variable, unused_import, unused_element, avoid_print, avoid_function_literals_in_foreach_calls, non_constant_identifier_names
+// ignore_for_file: camel_case_types, prefer_const_constructors, no_leading_underscores_for_local_identifiers, unused_local_variable, unused_import, unused_element, avoid_print, avoid_function_literals_in_foreach_calls, non_constant_identifier_names, use_build_context_synchronously
 
 import 'package:flutter/material.dart';
 import 'package:historical_bot_app/Dashboard/dashboard.dart';
@@ -11,8 +11,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'dart:async';
 
 class lahore_map extends StatefulWidget {
   const lahore_map({super.key});
@@ -22,172 +21,122 @@ class lahore_map extends StatefulWidget {
 }
 
 class _lahore_mapState extends State<lahore_map> {
-  late GoogleMapController _controller;
+  late GoogleMapController _mapController;
   final TextEditingController _searchController = TextEditingController();
   final Set<Marker> _markers = {};
   final Set<Polyline> _polylines = {};
   LatLng _currentLocation = LatLng(34.0151, 71.5249); // Default location
-  final String _googleApiKey =
-      'YOUR_GOOGLE_API_KEY'; // Replace with your API key
+  String googleApiKey = "";
 
   @override
   void initState() {
     super.initState();
-    _getCurrentLocation();
+    _initialize();
   }
 
-  Future<void> _getCurrentLocation() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      print("Location services are not enabled.");
-      return;
-    }
+  Future<void> _initialize() async {
+    try {
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
 
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        print("Location permissions denied.");
-        return;
-      }
-    }
+      setState(() {
+        _currentLocation = LatLng(position.latitude, position.longitude);
 
-    if (permission == LocationPermission.deniedForever) {
-      print("Location permissions are denied forever.");
-      return;
-    }
-
-    Position position = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
-    );
-
-    setState(() {
-      _currentLocation = LatLng(position.latitude, position.longitude);
-      _markers.add(
-        Marker(
-          markerId: const MarkerId("current_location"),
+        _markers.add(Marker(
+          markerId: MarkerId("current_location"),
           position: _currentLocation,
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueRed,
-          ),
-        ),
-      );
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        ));
+      });
 
-      // Move the map's camera to the current location
-      _controller.animateCamera(
-        CameraUpdate.newLatLngZoom(_currentLocation, 14),
-      );
-    });
+      _mapController
+          .animateCamera(CameraUpdate.newLatLngZoom(_currentLocation, 14));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("Failed to get current location"),
+      ));
+    }
   }
 
   Future<void> _searchLocation() async {
-    String address = _searchController.text;
+    final address = _searchController.text.trim();
     if (address.isEmpty) {
-      print("Please enter a destination.");
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("Please enter a destination."),
+      ));
       return;
     }
 
     try {
-      List<Location> locations = await locationFromAddress(address);
+      final locations = await locationFromAddress(address);
       if (locations.isNotEmpty) {
-        LatLng targetLocation = LatLng(
+        final searchedLocation = LatLng(
           locations.first.latitude,
           locations.first.longitude,
         );
 
         setState(() {
-          _markers.add(
-            Marker(
-              markerId: const MarkerId("searched_location"),
-              position: targetLocation,
-              icon: BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueViolet,
-              ),
-            ),
-          );
+          _markers.add(Marker(
+            markerId: MarkerId("searched_location"),
+            position: searchedLocation,
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueViolet),
+          ));
 
-          // Move the map's camera to the new target location
-          _controller.animateCamera(
-            CameraUpdate.newLatLngZoom(targetLocation, 14),
-          );
+          _mapController
+              .animateCamera(CameraUpdate.newLatLngZoom(searchedLocation, 14));
 
-          _drawRoute(_currentLocation, targetLocation);
+          // Draw Polyline
+          _drawPolyline(_currentLocation, searchedLocation);
         });
       }
     } catch (e) {
-      print("Error searching location: $e");
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("Error finding location."),
+      ));
     }
   }
 
-  Future<void> _drawRoute(LatLng start, LatLng end) async {
-    final String url =
-        'https://maps.googleapis.com/maps/api/directions/json?origin=${start.latitude},${start.longitude}&destination=${end.latitude},${end.longitude}&key=$_googleApiKey';
+  Future<void> _drawPolyline(LatLng start, LatLng end) async {
+    try {
+      print("Start Location: ${start.latitude}, ${start.longitude}");
+      print("End Location: ${end.latitude}, ${end.longitude}");
 
-    final http.Response response = await http.get(Uri.parse(url));
+      PolylinePoints polylinePoints = PolylinePoints();
 
-    if (response.statusCode == 200) {
-      final Map<String, dynamic> data = jsonDecode(response.body);
+      PolylineResult result = await polylinePoints.getRouteBetweenCoordinates(
+        googleApiKey,
+        PointLatLng(start.latitude, start.longitude),
+        PointLatLng(end.latitude, end.longitude),
+        travelMode: TravelMode.driving,
+      );
 
-      if (data['routes'].isNotEmpty) {
-        final String polylinePoints =
-            data['routes'][0]['overview_polyline']['points'];
-
-        final List<LatLng> polylineCoordinates =
-            _decodePolyline(polylinePoints);
+      if (result.points.isNotEmpty) {
+        List<LatLng> polylineCoordinates = result.points
+            .map((point) => LatLng(point.latitude, point.longitude))
+            .toList();
 
         setState(() {
-          _polylines.clear(); // Clear previous polylines to avoid stacking
           _polylines.add(
             Polyline(
-              polylineId: const PolylineId("route"),
-              points: polylineCoordinates,
+              polylineId: PolylineId("route"),
               color: Colors.blue,
-              width: 5,
+              width: 6,
+              points: polylineCoordinates,
             ),
           );
         });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Failed to get route")),
+        );
       }
-    } else {
-      print("Failed to get route information.");
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error drawing route: ${e.toString()}")),
+      );
     }
-  }
-
-  List<LatLng> _decodePolyline(String encoded) {
-    List<LatLng> points = [];
-    int index = 0;
-    int lat = 0;
-    int lon = 0;
-
-    while (index < encoded.length) {
-      int shift = 0;
-      int result = 0;
-      int b = 0;
-
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1F) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-
-      int dlat = ((result & 1) == 1 ? ~(result >> 1) : (result >> 1));
-      lat += dlat;
-
-      shift = 0;
-      result = 0;
-
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1F) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-
-      int dlon = ((result & 1) == 1 ? ~(result >> 1) : (result >> 1));
-      lon += dlon;
-
-      points.add(LatLng(lat / 1e5, lon / 1e5));
-    }
-
-    return points;
   }
 
   @override
@@ -281,14 +230,14 @@ class _lahore_mapState extends State<lahore_map> {
         children: [
           GoogleMap(
             onMapCreated: (GoogleMapController controller) {
-              _controller = controller;
+              _mapController = controller;
             },
             initialCameraPosition: CameraPosition(
               target: _currentLocation,
-              zoom: 12.0,
+              zoom: 12,
             ),
             markers: _markers,
-            polylines: _polylines, // Add polylines to the map
+            polylines: _polylines,
             myLocationEnabled: true,
             myLocationButtonEnabled: true,
           ),
